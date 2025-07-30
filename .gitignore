@@ -31,7 +31,8 @@ TNT/
 reports/
 dtu_exp/
 TNT_GOF
-exp*
+# exp*
 eval_tnt/TrainingSet
 dtu_eval/Offical_DTU_Dataset
 __pycache__
+output/
