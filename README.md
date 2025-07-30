@@ -45,14 +45,14 @@ conda activate gof
 pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 -f https://download.pytorch.org/whl/torch_stable.html
 conda install cudatoolkit-dev=11.3 -c conda-forge
 
-pip install -r requirements.txt
+pip install -r requirements.txt && pip install submodules/diff-gaussian-rasterization && pip install submodules/simple-knn/
 
 pip install submodules/diff-gaussian-rasterization
 pip install submodules/simple-knn/
 
 # tetra-nerf for triangulation
 cd submodules/tetra-triangulation
-conda install cmake
+conda install cmake && conda install conda-forge::gmp && conda install conda-forge::cgal
 conda install conda-forge::gmp
 conda install conda-forge::cgal
 cmake .
