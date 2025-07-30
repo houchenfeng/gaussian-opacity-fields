@@ -51,13 +51,15 @@ pip install submodules/diff-gaussian-rasterization
 pip install submodules/simple-knn/
 
 # tetra-nerf for triangulation
-cd submodules/tetra-triangulation
+cd submodules/tetra-triangulation && conda install cmake && conda install conda-forge::gmp && conda install conda-forge::cgal
 conda install cmake && conda install conda-forge::gmp && conda install conda-forge::cgal
 conda install conda-forge::gmp
 conda install conda-forge::cgal
-cmake .
+# cmake .
+cmake . -DUSE_CUDA=ON -D CMAKE_CUDA_COMPILER="/usr/local/cuda-11.6/bin/nvcc" -DCMAKE_CUDA_ARCHITECTURES=80 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_CXX_STANDARD=14
+ 
 # you can specify your own cuda path
-# export CPATH=/usr/local/cuda-11.3/targets/x86_64-linux/include:$CPATH
+# export CPATH=/usr/local/cuda-11.6/targets/x86_64-linux/include:$CPATH
 make 
 pip install -e .
 ```
