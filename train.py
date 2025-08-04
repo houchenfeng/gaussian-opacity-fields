@@ -64,7 +64,7 @@ def get_edge_aware_distortion_map(gt_image, distortion_map):
     return distortion_map * max_grad
     
 
-def L1_loss_appearance(image, gt_image, gaussians, view_idx, return_transformed_image=False):
+def L1_loss_appearance(image, gt_image, gaussians, view_idx, return_transformed_image=False,mask=None):
     appearance_embedding = gaussians.get_apperance_embedding(view_idx)
     # center crop the image
     origH, origW = image.shape[1:]
@@ -82,7 +82,7 @@ def L1_loss_appearance(image, gt_image, gaussians, view_idx, return_transformed_
     mapping_image = gaussians.appearance_network(crop_image_down)
     transformed_image = mapping_image * crop_image
     if not return_transformed_image:
-        return l1_loss(transformed_image, crop_gt_image)
+        return l1_loss(transformed_image, crop_gt_image,mask=mask)
     else:
         transformed_image = torch.nn.functional.interpolate(transformed_image, size=(origH, origW), mode="bilinear", align_corners=True)[0]
         return transformed_image
@@ -135,7 +135,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         if not viewpoint_stack:
             viewpoint_stack = scene.getTrainCameras().copy()
         viewpoint_cam = viewpoint_stack.pop(randint(0, len(viewpoint_stack)-1))
-        
+        robust_mask=viewpoint_cam.feature_mask_sam
         # Pick a random high resolution camera
         if random.random() < 0.3 and dataset.sample_more_highres:
             viewpoint_cam = trainCameras[highresolution_index[randint(0, len(highresolution_index)-1)]]
@@ -153,19 +153,25 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # rgb Loss
         gt_image = viewpoint_cam.original_image.cuda()
         
-        Ll1 = l1_loss(image, gt_image)
+        Ll1 = l1_loss(image, gt_image,mask=robust_mask)
         # use L1 loss for the transformed image if using decoupled appearance
         if dataset.use_decoupled_appearance:
-            Ll1 = L1_loss_appearance(image, gt_image, gaussians, viewpoint_cam.idx)
+            Ll1 = L1_loss_appearance(image, gt_image, gaussians, viewpoint_cam.idx,mask=robust_mask)
         
-        rgb_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        rgb_loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image,mask=robust_mask))
         
         # depth distortion regularization
         distortion_map = rendering[8, :, :]
         # edge aware regularization is not really helpful so we disable it
         # distortion_map = get_edge_aware_distortion_map(gt_image, distortion_map)
-        distortion_loss = distortion_map.mean()
-        
+        # 应用 mask：在 mask 为 1 的区域内不计算损失
+        # distortion_loss = distortion_map.mean()
+        # 应用 mask：在 mask 为 1 的区域内不计算损失
+        if robust_mask is not None and (robust_mask == 0).sum() > 0:
+            distortion_loss = distortion_map[robust_mask == 0].mean()
+        else:
+            distortion_loss = distortion_map.mean() if robust_mask is None else torch.tensor(0.0, device=distortion_map.device)
+                
         # depth normal consistency
         depth = rendering[6, :, :]
         depth_normal, _ = depth_to_normal(viewpoint_cam, depth[None, ...])
@@ -179,7 +185,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         render_normal_world = normal2.reshape(3, *render_normal.shape[1:])
         
         normal_error = 1 - (render_normal_world * depth_normal).sum(dim=0)
-        depth_normal_loss = normal_error.mean()
+        if robust_mask is not None and (robust_mask == 0).sum() > 0:
+            depth_normal_loss = normal_error[robust_mask == 0].mean()
         
         lambda_distortion = opt.lambda_distortion if iteration >= opt.distortion_from_iter else 0.0
         lambda_depth_normal = opt.lambda_depth_normal if iteration >= opt.depth_normal_from_iter else 0.0

@@ -13,15 +13,37 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from math import exp
+import math
 
-def l1_loss(network_output, gt):
-    return torch.abs((network_output - gt)).mean()
+# def l1_loss(network_output, gt):
+#     return torch.abs((network_output - gt)).mean()
 
-def l2_loss(network_output, gt):
-    return ((network_output - gt) ** 2).mean()
+# def l2_loss(network_output, gt):
+#     return ((network_output - gt) ** 2).mean()
+
+def l1_loss(network_output, gt, mask=None):
+    if mask is None:
+        return torch.abs(network_output - gt).mean()
+    else:
+        abs_diff = torch.abs(network_output - gt)
+        # 应用 mask：在 mask 为 1 的区域内不计算损失
+        masked_diff = abs_diff * (1 - mask)
+        return masked_diff.sum() / (1 - mask).sum()
+
+def l2_loss(network_output, gt, mask=None):
+    if mask is None:
+        return ((network_output - gt) ** 2).mean()
+    else:
+        squared_diff = (network_output - gt) ** 2
+        # 应用 mask：在 mask 为 1 的区域内不计算损失
+        masked_diff = squared_diff * (1 - mask)
+        return masked_diff.sum() / (1 - mask).sum()
+
+
+
 
 def gaussian(window_size, sigma):
-    gauss = torch.Tensor([exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
+    gauss = torch.Tensor([math.exp(-(x - window_size // 2) ** 2 / float(2 * sigma ** 2)) for x in range(window_size)])
     return gauss / gauss.sum()
 
 def create_window(window_size, channel):
@@ -30,7 +52,39 @@ def create_window(window_size, channel):
     window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
     return window
 
-def ssim(img1, img2, window_size=11, size_average=True):
+# def ssim(img1, img2, window_size=11, size_average=True):
+#     channel = img1.size(-3)
+#     window = create_window(window_size, channel)
+
+#     if img1.is_cuda:
+#         window = window.cuda(img1.get_device())
+#     window = window.type_as(img1)
+
+#     return _ssim(img1, img2, window, window_size, channel, size_average)
+
+# def _ssim(img1, img2, window, window_size, channel, size_average=True):
+#     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
+#     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
+
+#     mu1_sq = mu1.pow(2)
+#     mu2_sq = mu2.pow(2)
+#     mu1_mu2 = mu1 * mu2
+
+#     sigma1_sq = F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel) - mu1_sq
+#     sigma2_sq = F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel) - mu2_sq
+#     sigma12 = F.conv2d(img1 * img2, window, padding=window_size // 2, groups=channel) - mu1_mu2
+
+#     C1 = 0.01 ** 2
+#     C2 = 0.03 ** 2
+
+#     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+
+#     if size_average:
+#         return ssim_map.mean()
+#     else:
+#         return ssim_map.mean(1).mean(1).mean(1)
+
+def ssim(img1, img2, window_size=11, size_average=True, mask=None):
     channel = img1.size(-3)
     window = create_window(window_size, channel)
 
@@ -38,9 +92,8 @@ def ssim(img1, img2, window_size=11, size_average=True):
         window = window.cuda(img1.get_device())
     window = window.type_as(img1)
 
-    return _ssim(img1, img2, window, window_size, channel, size_average)
-
-def _ssim(img1, img2, window, window_size, channel, size_average=True):
+    return _ssim(img1, img2, window, window_size, channel, size_average, mask)
+def _ssim(img1, img2,  window, window_size, channel, size_average=True,mask=None):
     mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
     mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
 
@@ -57,8 +110,24 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
 
-    if size_average:
-        return ssim_map.mean()
-    else:
-        return ssim_map.mean(1).mean(1).mean(1)
+    # Expand mask to match the number of channels
+    if mask is not None:
+        if len(mask.shape)==2:
+            mask = mask.unsqueeze(0).expand_as(ssim_map)
+        else:
+            mask = mask.expand_as(ssim_map)
+            
+        # Apply mask: set SSIM values to zero where mask is 1 (ignore those areas)
+        masked_ssim_map = ssim_map * (1 - mask)
 
+        # Compute the mean SSIM, ignoring masked areas
+        if size_average:
+            return masked_ssim_map.sum() / (1 - mask).sum()
+        else:
+            return masked_ssim_map.sum(dim=[1, 2, 3]) / (1 - mask).sum(dim=[1, 2, 3])
+    else:
+
+        if size_average:
+            return ssim_map.mean()
+        else:
+            return ssim_map.mean(1).mean(1).mean(1)
